@@ -3,7 +3,8 @@ import uuid
 import ffmpeg
 from PyQt5.QtWidgets import (QWizardPage, QLabel, QVBoxLayout, QHBoxLayout,
                             QLineEdit, QPushButton, QComboBox, QFileDialog,
-                            QMessageBox, QGroupBox, QScrollArea, QWidget)
+                            QMessageBox, QGroupBox, QScrollArea, QWidget,
+                            QCheckBox)
 from .constants import LANGUAGES
 from .utils import get_default_temp_dir
 
@@ -11,7 +12,7 @@ class MediaTagManagementPage(QWizardPage):
     def __init__(self):
         super().__init__()
         self.setTitle("字幕・タグ管理")
-        self.setSubTitle("メディアファイルの字幕を管理します")
+        self.setSubTitle("メディアファイルの言語設定とメタデータを管理します")
         self.subtitle_groups = []
 
         # メインレイアウト
@@ -39,6 +40,26 @@ class MediaTagManagementPage(QWizardPage):
         output_layout.addWidget(self.output_browse_button)
         main_layout.addLayout(output_layout)
 
+        # 映像言語設定
+        video_group = QGroupBox("映像設定")
+        video_layout = QVBoxLayout()
+        video_lang_layout = QHBoxLayout()
+        self.video_lang_combo = QComboBox()
+        for code, name in LANGUAGES:
+            self.video_lang_combo.addItem(name, code)
+        video_lang_layout.addWidget(QLabel("映像の言語:"))
+        video_lang_layout.addWidget(self.video_lang_combo)
+        video_layout.addLayout(video_lang_layout)
+        video_group.setLayout(video_layout)
+        main_layout.addWidget(video_group)
+
+        # オーディオ設定
+        audio_group = QGroupBox("オーディオ設定")
+        audio_layout = QVBoxLayout()
+        self.audio_settings = []  # オーディオ設定を保持
+        audio_group.setLayout(audio_layout)
+        main_layout.addWidget(audio_group)
+
         # 字幕追加ボタン
         add_button = QPushButton("字幕を追加")
         add_button.clicked.connect(self.add_subtitle_group)
@@ -57,6 +78,130 @@ class MediaTagManagementPage(QWizardPage):
         # 必須フィールドとして設定
         self.registerField("input_file*", self.file_edit)
         self.registerField("output_file*", self.output_edit)
+
+        # レイアウトを保持
+        self.audio_layout = audio_layout
+
+    def update_audio_settings(self, probe_data):
+        """オーディオ設定を更新"""
+        # 既存の設定をクリア
+        for setting in self.audio_settings:
+            for widget in setting.values():
+                if isinstance(widget, QWidget):
+                    widget.deleteLater()
+        self.audio_settings.clear()
+
+        # オーディオストリームごとに設定を追加
+        audio_index = 0
+        for i, stream in enumerate(probe_data['streams']):
+            if stream['codec_type'] == 'audio':
+                group = QGroupBox(f"オーディオ #{audio_index}")
+                layout = QVBoxLayout()
+
+                # 言語設定
+                lang_layout = QHBoxLayout()
+                lang_combo = QComboBox()
+                for code, name in LANGUAGES:
+                    lang_combo.addItem(name, code)
+                # 現在の言語を設定
+                if 'tags' in stream and 'language' in stream['tags']:
+                    current_lang = stream['tags']['language']
+                    index = lang_combo.findData(current_lang)
+                    if index >= 0:
+                        lang_combo.setCurrentIndex(index)
+                lang_layout.addWidget(QLabel("言語:"))
+                lang_layout.addWidget(lang_combo)
+                layout.addLayout(lang_layout)
+
+                # デフォルトフラグ
+                default_check = QCheckBox("デフォルトオーディオ")
+                if 'disposition' in stream and stream['disposition'].get('default', 0) == 1:
+                    default_check.setChecked(True)
+                layout.addWidget(default_check)
+
+                group.setLayout(layout)
+                self.audio_layout.addWidget(group)
+                self.audio_settings.append({
+                    'group': group,
+                    'language': lang_combo,
+                    'default': default_check,
+                    'stream_index': i,
+                    'audio_index': audio_index
+                })
+                audio_index += 1
+
+    def update_existing_subtitles(self, probe_data):
+        """既存の字幕ストリームを字幕グループとして追加"""
+        subtitle_index = 0
+        for i, stream in enumerate(probe_data['streams']):
+            if stream['codec_type'] == 'subtitle':
+                group = QGroupBox(f"字幕 #{len(self.subtitle_groups) + 1}")
+                layout = QVBoxLayout()
+
+                # 既存の字幕の情報を表示
+                info_label = QLabel("既存の字幕ストリーム")
+                info_label.setStyleSheet("font-weight: bold;")
+                layout.addWidget(info_label)
+
+                # 言語選択
+                lang_layout = QHBoxLayout()
+                lang_combo = QComboBox()
+                for code, name in LANGUAGES:
+                    lang_combo.addItem(name, code)
+                # 現在の言語を設定
+                if 'tags' in stream and 'language' in stream['tags']:
+                    current_lang = stream['tags']['language']
+                    index = lang_combo.findData(current_lang)
+                    if index >= 0:
+                        lang_combo.setCurrentIndex(index)
+                lang_layout.addWidget(QLabel("言語:"))
+                lang_layout.addWidget(lang_combo)
+                layout.addLayout(lang_layout)
+
+                # 関連付けるオーディオ選択
+                audio_layout = QHBoxLayout()
+                audio_combo = QComboBox()
+                audio_combo.addItem("なし", None)
+                for setting in self.audio_settings:
+                    audio_index = setting['audio_index']
+                    lang = setting['language'].currentText()
+                    audio_combo.addItem(f"オーディオ #{audio_index} ({lang})", setting['stream_index'])
+                audio_layout.addWidget(QLabel("関連付けるオーディオ:"))
+                audio_layout.addWidget(audio_combo)
+                layout.addLayout(audio_layout)
+
+                # フラグ設定
+                flags_layout = QHBoxLayout()
+                default_check = QCheckBox("デフォルト字幕")
+                forced_check = QCheckBox("強制字幕")
+                if 'disposition' in stream:
+                    if stream['disposition'].get('default', 0) == 1:
+                        default_check.setChecked(True)
+                    if stream['disposition'].get('forced', 0) == 1:
+                        forced_check.setChecked(True)
+                flags_layout.addWidget(default_check)
+                flags_layout.addWidget(forced_check)
+                layout.addLayout(flags_layout)
+
+                # 削除ボタン
+                delete_button = QPushButton("この字幕を削除")
+                delete_button.clicked.connect(lambda: self.remove_subtitle_group(group))
+                layout.addWidget(delete_button)
+
+                group.setLayout(layout)
+                self.subtitle_layout.addWidget(group)
+                self.subtitle_groups.append({
+                    'group': group,
+                    'file': None,  # 既存の字幕なのでファイルはない
+                    'language': lang_combo,
+                    'audio': audio_combo,
+                    'default': default_check,
+                    'forced': forced_check,
+                    'stream_index': i,  # 元のストリームのインデックスを保持
+                    'subtitle_index': subtitle_index,  # 字幕のインデックスを保持
+                    'is_existing': True  # 既存の字幕であることを示すフラグ
+                })
+                subtitle_index += 1
 
     def add_subtitle_group(self):
         """字幕グループを追加"""
@@ -91,6 +236,14 @@ class MediaTagManagementPage(QWizardPage):
         audio_layout.addWidget(audio_combo)
         layout.addLayout(audio_layout)
 
+        # フラグ設定
+        flags_layout = QHBoxLayout()
+        default_check = QCheckBox("デフォルト字幕")
+        forced_check = QCheckBox("強制字幕")
+        flags_layout.addWidget(default_check)
+        flags_layout.addWidget(forced_check)
+        layout.addLayout(flags_layout)
+
         # 削除ボタン
         delete_button = QPushButton("この字幕を削除")
         delete_button.clicked.connect(lambda: self.remove_subtitle_group(group))
@@ -102,8 +255,14 @@ class MediaTagManagementPage(QWizardPage):
             'group': group,
             'file': file_edit,
             'language': lang_combo,
-            'audio': audio_combo
+            'audio': audio_combo,
+            'default': default_check,
+            'forced': forced_check
         })
+
+        # オーディオストリーム情報を更新
+        if self.file_edit.text():
+            self.update_audio_streams(self.file_edit.text())
 
     def remove_subtitle_group(self, group):
         """字幕グループを削除"""
@@ -127,8 +286,47 @@ class MediaTagManagementPage(QWizardPage):
             dir_name = os.path.dirname(file_path)
             base_name = os.path.splitext(os.path.basename(file_path))[0]
             self.output_edit.setText(os.path.join(dir_name, f"{base_name}_output.mp4"))
-            # オーディオストリーム情報を更新
-            self.update_audio_streams(file_path)
+
+            try:
+                # FFmpegのパスを設定
+                config = self.wizard().config
+                if config.has_option("Settings", "ffmpeg_path"):
+                    ffmpeg_dir = os.path.dirname(config.get("Settings", "ffmpeg_path"))
+                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+
+                # メディア情報を取得
+                probe = ffmpeg.probe(file_path)
+
+                # 映像言語を設定
+                for stream in probe['streams']:
+                    if stream['codec_type'] == 'video':
+                        if 'tags' in stream and 'language' in stream['tags']:
+                            lang = stream['tags']['language']
+                            index = self.video_lang_combo.findData(lang)
+                            if index >= 0:
+                                self.video_lang_combo.setCurrentIndex(index)
+                        break
+
+                # 既存の字幕グループをクリア
+                for group in self.subtitle_groups:
+                    group['group'].deleteLater()
+                self.subtitle_groups.clear()
+
+                # オーディオ設定を更新
+                self.update_audio_settings(probe)
+
+                # 既存の字幕を追加
+                self.update_existing_subtitles(probe)
+
+                # オーディオストリーム情報を更新
+                self.update_audio_streams(file_path)
+
+            except ffmpeg.Error as e:
+                QMessageBox.warning(self, "警告",
+                                  f"メディア情報の取得に失敗しました:\n{str(e)}")
+            except Exception as e:
+                QMessageBox.warning(self, "警告",
+                                  f"予期せぬエラーが発生しました:\n{str(e)}")
 
     def browse_output(self):
         """出力ファイルを選択"""
@@ -211,38 +409,61 @@ class MediaTagManagementPage(QWizardPage):
             probe = ffmpeg.probe(input_file)
             input_stream = ffmpeg.input(input_file)
             streams = []
-            subtitle_index = 0
+            metadata = {}
 
-            # 元のストリームをマッピング
+            # 映像ストリームの設定
             streams.append(input_stream['v:0'])
-            for i, stream in enumerate(probe['streams']):
-                if stream['codec_type'] == 'audio':
-                    streams.append(input_stream[f'a:{i}'])
+            video_lang = self.video_lang_combo.currentData()
+            metadata['metadata:s:v:0'] = f'language={video_lang}'
 
-            # 字幕ファイルを処理
+            # オーディオストリームの設定
+            for audio_setting in self.audio_settings:
+                stream_index = audio_setting['stream_index']
+                audio_index = audio_setting['audio_index']
+                streams.append(input_stream[f'a:{stream_index}'])
+                lang_code = audio_setting['language'].currentData()
+                metadata[f'metadata:s:a:{audio_index}'] = f'language={lang_code}'
+                if audio_setting['default'].isChecked():
+                    metadata[f'disposition:a:{audio_index}'] = 'default'
+
+            # 字幕ストリームを処理
+            subtitle_index = 0
             for group in self.subtitle_groups:
-                subtitle_file = group['file'].text()
-                if not subtitle_file:
-                    continue
+                if group.get('is_existing', False):
+                    # 既存の字幕ストリームを追加
+                    stream_index = group['stream_index']
+                    streams.append(input_stream[f's:{stream_index}'])
+                else:
+                    # 新しい字幕ファイルを処理
+                    subtitle_file = group['file'].text()
+                    if not subtitle_file:
+                        continue
 
-                # 字幕ファイルを一時ディレクトリにコピー
-                temp_subtitle = os.path.join(
-                    temp_dir,
-                    f"sub_{uuid.uuid4().hex[:16]}{os.path.splitext(subtitle_file)[1]}"
-                )
-                with open(subtitle_file, 'rb') as src, open(temp_subtitle, 'wb') as dst:
-                    dst.write(src.read())
+                    # 字幕ファイルを一時ディレクトリにコピー
+                    temp_subtitle = os.path.join(
+                        temp_dir,
+                        f"sub_{uuid.uuid4().hex[:16]}{os.path.splitext(subtitle_file)[1]}"
+                    )
+                    with open(subtitle_file, 'rb') as src, open(temp_subtitle, 'wb') as dst:
+                        dst.write(src.read())
 
-                # 字幕ストリームを追加
-                subtitle_stream = ffmpeg.input(temp_subtitle)
-                streams.append(subtitle_stream)
+                    # 字幕ストリームを追加
+                    subtitle_stream = ffmpeg.input(temp_subtitle)
+                    streams.append(subtitle_stream)
 
-                # メタデータを設定
-                metadata = {}
+                # 字幕のメタデータを設定
                 lang_code = group['language'].currentData()
-                if lang_code != 'und':
-                    metadata[f'metadata:s:s:{subtitle_index}'] = f'language={lang_code}'
-                    metadata[f'metadata:s:s:{subtitle_index}'] = f'title={group["language"].currentText()}'
+                metadata[f'metadata:s:s:{subtitle_index}'] = f'language={lang_code}'
+                metadata[f'metadata:s:s:{subtitle_index}'] = f'title={group["language"].currentText()}'
+
+                # デフォルトと強制フラグを設定
+                disposition = []
+                if group['default'].isChecked():
+                    disposition.append('default')
+                if group['forced'].isChecked():
+                    disposition.append('forced')
+                if disposition:
+                    metadata[f'disposition:s:{subtitle_index}'] = '+'.join(disposition)
 
                 # 関連付けられたオーディオがある場合
                 audio_index = group['audio'].currentData()
@@ -265,7 +486,7 @@ class MediaTagManagementPage(QWizardPage):
             # 成功したら一時ファイルを最終出力先に移動
             os.replace(temp_output, output_file)
 
-            QMessageBox.information(self, "成功", "字幕の処理が完了しました。")
+            QMessageBox.information(self, "成功", "メディアファイルの処理が完了しました。")
             return True
 
         except ffmpeg.Error as e:
@@ -308,9 +529,11 @@ class MediaTagManagementPage(QWizardPage):
 
         # 各字幕グループの検証
         for group in self.subtitle_groups:
-            if not group['file'].text():
-                QMessageBox.warning(self, "警告", "すべての字幕ファイルを選択してください。")
-                return False
+            # 既存の字幕の場合はファイル選択のチェックをスキップ
+            if not group.get('is_existing', False):
+                if not group['file'].text():
+                    QMessageBox.warning(self, "警告", "すべての字幕ファイルを選択してください。")
+                    return False
 
         # 字幕の処理を実行
         return self.process_subtitles()
