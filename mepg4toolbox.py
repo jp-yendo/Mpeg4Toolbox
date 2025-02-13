@@ -66,7 +66,7 @@ class Mpeg4Wizard(QWizard):
             current_page = self.currentPage()
             # 処理が成功した場合のみ最初のページに戻る
             if isinstance(current_page, MediaTagManagementPage):
-                # 字幕管理ページの場合は、validatePageの結果に基づいて処理
+                # 字幕・タグ管理ページの場合は、validatePageの結果に基づいて処理
                 if not current_page.validatePage():
                     # 処理が失敗した場合は現在のページにとどまる
                     self.show()

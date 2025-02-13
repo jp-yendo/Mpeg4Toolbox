@@ -10,7 +10,7 @@ from .utils import get_default_temp_dir
 class MediaTagManagementPage(QWizardPage):
     def __init__(self):
         super().__init__()
-        self.setTitle("字幕管理")
+        self.setTitle("字幕・タグ管理")
         self.setSubTitle("メディアファイルの字幕を管理します")
         self.subtitle_groups = []
 

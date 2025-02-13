@@ -13,7 +13,7 @@ class TaskSelectionPage(QWizardPage):
         # タスクの選択肢
         self.tasks = [
             ("info", "詳細情報表示"),
-            ("subtitle", "字幕管理"),
+            ("subtitle", "字幕・タグ管理"),
             ("settings", "FFmpeg設定")
         ]
 
