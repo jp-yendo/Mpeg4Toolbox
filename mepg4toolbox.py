@@ -99,13 +99,12 @@ class TaskSelectionPage(QWizardPage):
             if i == 0:  # 最初のオプションをデフォルトで選択
                 radio.setChecked(True)
 
-        self.setLayout(layout)
-
         # 選択されたタスクを追跡するための隠しフィールド
         self.selected_task = QLineEdit()
         self.selected_task.hide()
         layout.addWidget(self.selected_task)
-        self.registerField("selected_task*", self.selected_task)
+
+        self.setLayout(layout)
 
         # ボタングループの選択変更時にフィールドを更新
         self.button_group.buttonClicked.connect(self.update_selected_task)
@@ -113,16 +112,16 @@ class TaskSelectionPage(QWizardPage):
         # 初期値を設定
         self.update_selected_task(self.task_buttons[0])
 
+        # 必須フィールドとして設定（初期値設定後に行う）
+        self.registerField("selected_task*", self.selected_task)
+
+    def isComplete(self):
+        """ページが完了状態かどうかを判断"""
+        # いずれかのラジオボタンが選択されていればTrue
+        return self.button_group.checkedButton() is not None
+
     def initializePage(self):
         """ページの初期化"""
-        # 最初のページ用のボタンレイアウト
-        wizard = self.wizard()
-        wizard.setButtonLayout([
-            QWizard.Stretch,
-            QWizard.NextButton,
-            QWizard.CancelButton
-        ])
-
         # ラジオボタンの状態を更新
         current_task = self.selected_task.text()
         for i, (task_id, _) in enumerate(self.tasks):
@@ -133,11 +132,15 @@ class TaskSelectionPage(QWizardPage):
     def update_selected_task(self, button):
         index = self.button_group.id(button)
         if 0 <= index < len(self.tasks):
-            self.selected_task.setText(self.tasks[index][0])
+            task_id = self.tasks[index][0]
+            self.selected_task.setText(task_id)
+            # 値が変更されたことを通知
+            self.completeChanged.emit()
 
     def validatePage(self):
         """ページの検証"""
         current_task = self.selected_task.text()
+        wizard = self.wizard()
 
         # 字幕管理が選択された場合（未実装）
         if current_task == "subtitle":
@@ -146,7 +149,6 @@ class TaskSelectionPage(QWizardPage):
 
         # FFmpegの設定が必要なタスクの場合
         if current_task in ["info", "subtitle"]:
-            wizard = self.wizard()
             if not wizard.config.has_option("Settings", "ffmpeg_path"):
                 QMessageBox.warning(self, "警告", "先にFFmpegの設定を行ってください。")
                 return False
@@ -158,12 +160,10 @@ class TaskSelectionPage(QWizardPage):
         current_task = self.selected_task.text()
         wizard = self.wizard()
 
-        # FFmpegの設定が必要なタスクの場合
-        if current_task in ["info", "subtitle"]:
+        if current_task == "info":
             if not wizard.config.has_option("Settings", "ffmpeg_path"):
                 return wizard.ffmpeg_settings_page_id
-            elif current_task == "info":
-                return wizard.media_info_page_id
+            return wizard.media_info_page_id
         elif current_task == "settings":
             return wizard.ffmpeg_settings_page_id
 
@@ -198,6 +198,12 @@ class MediaInfoPage(QWizardPage):
 
         # 必須フィールドとして設定
         self.registerField("media_file*", self.file_edit)
+
+    def initializePage(self):
+        """ページの初期化"""
+        # ファイル選択をクリア
+        self.file_edit.clear()
+        self.info_text.clear()
 
     def validatePage(self):
         # ファイルが選択されていない場合はエラー
@@ -311,6 +317,9 @@ class Mpeg4Wizard(QWizard):
         self.finished.connect(self.on_finished)
         self.rejected.connect(self.on_rejected)
 
+        # ページ遷移時の処理を設定
+        self.currentIdChanged.connect(self.on_page_changed)
+
         # 最初のページを設定
         self.setStartId(self.task_selection_page_id)
 
@@ -338,6 +347,30 @@ class Mpeg4Wizard(QWizard):
         """キャンセル（閉じる）ボタンが押されたときの処理"""
         # プログラムを終了
         QApplication.quit()
+
+    def on_page_changed(self, page_id):
+        """ページが変更されたときの処理"""
+        current_page = self.currentPage()
+        if current_page == self.task_selection_page:
+            self.setButtonLayout([
+                QWizard.Stretch,
+                QWizard.NextButton,
+                QWizard.CancelButton
+            ])
+        elif current_page == self.ffmpeg_settings_page:
+            self.setButtonLayout([
+                QWizard.BackButton,
+                QWizard.Stretch,
+                QWizard.FinishButton,
+                QWizard.CancelButton
+            ])
+        elif current_page == self.media_info_page:
+            self.setButtonLayout([
+                QWizard.BackButton,
+                QWizard.Stretch,
+                QWizard.FinishButton,
+                QWizard.CancelButton
+            ])
 
 def main():
     app = QApplication(sys.argv)
