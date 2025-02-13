@@ -169,3 +169,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Application specific
+mpeg4toolbox.ini
+*.mp4
+output/
