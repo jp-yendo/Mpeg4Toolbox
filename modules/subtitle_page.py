@@ -1,6 +1,7 @@
 import os
 import uuid
 import ffmpeg
+import subprocess
 from PyQt5.QtWidgets import (QWizardPage, QLabel, QVBoxLayout, QHBoxLayout,
                             QLineEdit, QPushButton, QComboBox, QFileDialog,
                             QMessageBox, QGroupBox, QScrollArea, QWidget,
@@ -385,133 +386,6 @@ class MediaTagManagementPage(QWizardPage):
             QMessageBox.warning(self, "警告",
                               f"予期せぬエラーが発生しました:\n{str(e)}")
 
-    def process_subtitles(self):
-        """字幕の処理を実行"""
-        input_file = self.file_edit.text()
-        output_file = self.output_edit.text()
-        config = self.wizard().config
-
-        # FFmpegのパスを設定
-        if not config.has_option("Settings", "ffmpeg_path"):
-            QMessageBox.critical(self, "エラー", "FFmpegの設定が見つかりません。")
-            return False
-
-        ffmpeg_path = config.get("Settings", "ffmpeg_path")
-        ffmpeg_dir = os.path.dirname(ffmpeg_path)
-        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
-
-        # 一時ディレクトリの設定
-        temp_dir = config.get("Settings", "temp_dir", fallback=get_default_temp_dir())
-        os.makedirs(temp_dir, exist_ok=True)
-
-        try:
-            # 入力ファイルのストリーム情報を取得
-            probe = ffmpeg.probe(input_file)
-            input_stream = ffmpeg.input(input_file)
-            streams = []
-            metadata = {}
-
-            # 映像ストリームの設定
-            streams.append(input_stream['v:0'])
-            video_lang = self.video_lang_combo.currentData()
-            metadata['metadata:s:v:0'] = f'language={video_lang}'
-
-            # オーディオストリームの設定
-            for audio_setting in self.audio_settings:
-                stream_index = audio_setting['stream_index']
-                audio_index = audio_setting['audio_index']
-                streams.append(input_stream[f'a:{stream_index}'])
-                lang_code = audio_setting['language'].currentData()
-                metadata[f'metadata:s:a:{audio_index}'] = f'language={lang_code}'
-                if audio_setting['default'].isChecked():
-                    metadata[f'disposition:a:{audio_index}'] = 'default'
-
-            # 字幕ストリームを処理
-            subtitle_index = 0
-            for group in self.subtitle_groups:
-                if group.get('is_existing', False):
-                    # 既存の字幕ストリームを追加
-                    stream_index = group['stream_index']
-                    streams.append(input_stream[f's:{stream_index}'])
-                else:
-                    # 新しい字幕ファイルを処理
-                    subtitle_file = group['file'].text()
-                    if not subtitle_file:
-                        continue
-
-                    # 字幕ファイルを一時ディレクトリにコピー
-                    temp_subtitle = os.path.join(
-                        temp_dir,
-                        f"sub_{uuid.uuid4().hex[:16]}{os.path.splitext(subtitle_file)[1]}"
-                    )
-                    with open(subtitle_file, 'rb') as src, open(temp_subtitle, 'wb') as dst:
-                        dst.write(src.read())
-
-                    # 字幕ストリームを追加
-                    subtitle_stream = ffmpeg.input(temp_subtitle)
-                    streams.append(subtitle_stream)
-
-                # 字幕のメタデータを設定
-                lang_code = group['language'].currentData()
-                metadata[f'metadata:s:s:{subtitle_index}'] = f'language={lang_code}'
-                metadata[f'metadata:s:s:{subtitle_index}'] = f'title={group["language"].currentText()}'
-
-                # デフォルトと強制フラグを設定
-                disposition = []
-                if group['default'].isChecked():
-                    disposition.append('default')
-                if group['forced'].isChecked():
-                    disposition.append('forced')
-                if disposition:
-                    metadata[f'disposition:s:{subtitle_index}'] = '+'.join(disposition)
-
-                # 関連付けられたオーディオがある場合
-                audio_index = group['audio'].currentData()
-                if audio_index is not None:
-                    metadata[f'metadata:s:s:{subtitle_index}'] = f'audio_track={audio_index}'
-
-                subtitle_index += 1
-
-            # 出力ファイルを一時ディレクトリに作成
-            temp_output = os.path.join(temp_dir, f"output_{uuid.uuid4().hex[:16]}.mp4")
-
-            # FFmpegコマンドを構築して実行
-            stream = ffmpeg.output(*streams, temp_output,
-                                 acodec='copy',
-                                 vcodec='copy',
-                                 **metadata)
-
-            ffmpeg.run(stream, overwrite_output=True)
-
-            # 成功したら一時ファイルを最終出力先に移動
-            os.replace(temp_output, output_file)
-
-            QMessageBox.information(self, "成功", "メディアファイルの処理が完了しました。")
-            return True
-
-        except ffmpeg.Error as e:
-            QMessageBox.critical(self, "エラー",
-                               f"字幕の処理に失敗しました:\n{str(e)}")
-            return False
-        except Exception as e:
-            QMessageBox.critical(self, "エラー",
-                               f"予期せぬエラーが発生しました:\n{str(e)}")
-            return False
-        finally:
-            # 一時ファイルの削除
-            for group in self.subtitle_groups:
-                subtitle_file = group['file'].text()
-                if subtitle_file:
-                    temp_subtitle = os.path.join(
-                        temp_dir,
-                        f"sub_{os.path.splitext(subtitle_file)[1]}"
-                    )
-                    try:
-                        if os.path.exists(temp_subtitle):
-                            os.remove(temp_subtitle)
-                    except:
-                        pass
-
     def validatePage(self):
         """ページの検証と処理の実行"""
         # 入力ファイルと出力ファイルが選択されているか確認
@@ -522,12 +396,7 @@ class MediaTagManagementPage(QWizardPage):
             QMessageBox.warning(self, "警告", "出力ファイルを選択してください。")
             return False
 
-        # 少なくとも1つの字幕が追加されているか確認
-        if not self.subtitle_groups:
-            QMessageBox.warning(self, "警告", "少なくとも1つの字幕を追加してください。")
-            return False
-
-        # 各字幕グループの検証
+        # 字幕グループがある場合は検証
         for group in self.subtitle_groups:
             # 既存の字幕の場合はファイル選択のチェックをスキップ
             if not group.get('is_existing', False):
@@ -537,6 +406,197 @@ class MediaTagManagementPage(QWizardPage):
 
         # 字幕の処理を実行
         return self.process_subtitles()
+
+    def process_subtitles(self):
+        """字幕の処理を実行"""
+        input_file = self.file_edit.text()
+        output_file = self.output_edit.text()
+        config = self.wizard().config
+        temp_files = []  # 一時ファイルのパスを保持
+
+        try:
+            # FFmpegのパスを設定
+            if not config.has_option("Settings", "ffmpeg_path"):
+                QMessageBox.critical(self, "エラー", "FFmpegの設定が見つかりません。")
+                return False
+
+            ffmpeg_path = config.get("Settings", "ffmpeg_path")
+            ffmpeg_dir = os.path.dirname(ffmpeg_path)
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+
+            # 一時ディレクトリの設定
+            temp_dir = config.get("Settings", "temp_dir", fallback=get_default_temp_dir())
+            os.makedirs(temp_dir, exist_ok=True)
+
+            # 入力ファイルのストリーム情報を取得
+            probe = ffmpeg.probe(input_file)
+            input_stream = ffmpeg.input(input_file)
+            metadata = {}
+
+            # 映像ストリームの設定
+            video_lang = self.video_lang_combo.currentData()
+            metadata['metadata:s:v:0'] = f'language={video_lang}'
+
+            # オーディオストリームの設定
+            audio_index = 0
+            for audio_setting in self.audio_settings:
+                lang_code = audio_setting['language'].currentData()
+                # オーディオストリームの言語設定
+                metadata[f'metadata:s:a:{audio_index}'] = f'language={lang_code}'
+                # デフォルトフラグの設定
+                if audio_setting['default'].isChecked():
+                    metadata[f'disposition:a:{audio_index}'] = 'default'
+                audio_index += 1
+
+            # 出力ファイルを一時ディレクトリに作成
+            temp_output = os.path.join(temp_dir, f"output_{uuid.uuid4().hex[:16]}.mp4")
+            temp_files.append(temp_output)
+
+            # 字幕がない場合は基本のストリームのみ処理
+            if not self.subtitle_groups:
+                args = [ffmpeg_path, '-i', input_file]
+                # 映像とオーディオのマッピング
+                args.extend(['-map', '0:v:0'])  # 映像
+                for audio_setting in self.audio_settings:
+                    args.extend(['-map', f'0:a:{audio_setting["audio_index"]}'])
+
+                # コーデックの設定
+                args.extend(['-c:v', 'copy'])  # ビデオコーデック
+                args.extend(['-c:a', 'copy'])  # オーディオコーデック
+
+                # 映像の言語設定
+                args.extend(['-metadata:s:v:0', f'language={video_lang}'])
+
+                # オーディオの言語とデフォルト設定
+                audio_index = 0
+                for audio_setting in self.audio_settings:
+                    lang_code = audio_setting['language'].currentData()
+                    args.extend([f'-metadata:s:a:{audio_index}', f'language={lang_code}'])
+                    if audio_setting['default'].isChecked():
+                        args.extend([f'-disposition:a:{audio_index}', 'default'])
+                    else:
+                        args.extend([f'-disposition:a:{audio_index}', '0'])
+                    audio_index += 1
+
+                args.extend(['-y', temp_output])
+            else:
+                # 字幕ストリームを処理
+                args = [ffmpeg_path, '-i', input_file]  # メインの入力ファイル
+
+                # 字幕ファイルの入力を追加
+                subtitle_files = []
+                for group in self.subtitle_groups:
+                    if not group.get('is_existing', False) and group['file'].text():
+                        subtitle_file = group['file'].text()
+                        # 字幕ファイルを一時ディレクトリにコピー
+                        temp_subtitle = os.path.join(
+                            temp_dir,
+                            f"sub_{uuid.uuid4().hex[:16]}{os.path.splitext(subtitle_file)[1]}"
+                        )
+                        with open(subtitle_file, 'rb') as src, open(temp_subtitle, 'wb') as dst:
+                            dst.write(src.read())
+                        temp_files.append(temp_subtitle)
+                        subtitle_files.append(temp_subtitle)
+                        args.extend(['-i', temp_subtitle])
+
+                # ストリームのマッピング
+                args.extend(['-map', '0:v:0'])  # 映像
+                for audio_setting in self.audio_settings:
+                    args.extend(['-map', f'0:a:{audio_setting["audio_index"]}'])
+
+                # 字幕のマッピング
+                subtitle_index = 0
+                input_index = 1
+                for group in self.subtitle_groups:
+                    if group.get('is_existing', False):
+                        args.extend(['-map', f'0:s:{group["subtitle_index"]}'])
+                    else:
+                        if group['file'].text():
+                            args.extend(['-map', f'{input_index}:0'])
+                            input_index += 1
+                    subtitle_index += 1
+
+                # コーデックの設定
+                args.extend(['-c:v', 'copy'])  # ビデオコーデック
+                args.extend(['-c:a', 'copy'])  # オーディオコーデック
+                args.extend(['-c:s', 'mov_text'])  # 字幕コーデック
+
+                # 映像の言語設定
+                args.extend(['-metadata:s:v:0', f'language={video_lang}'])
+
+                # オーディオの言語とデフォルト設定
+                audio_index = 0
+                for audio_setting in self.audio_settings:
+                    lang_code = audio_setting['language'].currentData()
+                    args.extend([f'-metadata:s:a:{audio_index}', f'language={lang_code}'])
+                    if audio_setting['default'].isChecked():
+                        args.extend([f'-disposition:a:{audio_index}', 'default'])
+                    else:
+                        args.extend([f'-disposition:a:{audio_index}', '0'])
+                    audio_index += 1
+
+                # 字幕の言語とフラグ設定
+                subtitle_index = 0
+                for group in self.subtitle_groups:
+                    lang_code = group['language'].currentData()
+                    # 言語設定
+                    args.extend([f'-metadata:s:s:{subtitle_index}', f'language={lang_code}'])
+                    args.extend([f'-metadata:s:s:{subtitle_index}', f'title={group["language"].currentText()}'])
+
+                    # デフォルトと強制フラグ
+                    disposition = []
+                    if group['default'].isChecked():
+                        disposition.append('default')
+                    if group['forced'].isChecked():
+                        disposition.append('forced')
+
+                    if disposition:
+                        args.extend([f'-disposition:s:{subtitle_index}', '+'.join(disposition)])
+                    else:
+                        args.extend([f'-disposition:s:{subtitle_index}', '0'])
+
+                    # 関連付けられたオーディオ
+                    audio_index = group['audio'].currentData()
+                    if audio_index is not None:
+                        args.extend([f'-metadata:s:s:{subtitle_index}', f'audio_track={audio_index}'])
+
+                    subtitle_index += 1
+
+                args.extend(['-y', temp_output])
+
+            # FFmpegコマンドを実行
+            print("FFmpeg command:", ' '.join(args))
+            process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+
+            if process.returncode != 0:
+                error_message = stderr.decode() if stderr else "不明なエラー"
+                print("FFmpeg error output:", error_message)
+                raise ffmpeg.Error('FFmpeg error', stdout, stderr)
+
+            # 成功したら一時ファイルを最終出力先に移動
+            os.replace(temp_output, output_file)
+
+            QMessageBox.information(self, "成功", "メディアファイルの処理が完了しました。")
+            return True
+
+        except ffmpeg.Error as e:
+            error_detail = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else str(e)
+            QMessageBox.critical(self, "エラー",
+                               f"メディアファイルの処理に失敗しました:\n{error_detail}")
+            return False
+        except Exception as e:
+            QMessageBox.critical(self, "エラー",
+                               f"予期せぬエラーが発生しました:\n{str(e)}")
+            return False
+        finally:
+            # 一時ファイルの削除
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except Exception as e:
+                    print(f"一時ファイルの削除に失敗しました: {temp_file}\n{str(e)}")
 
     def nextId(self):
         """次のページのIDを返す"""
