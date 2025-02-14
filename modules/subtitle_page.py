@@ -388,6 +388,12 @@ class MediaTagManagementPage(QWizardPage):
 
     def validatePage(self):
         """ページの検証と処理の実行"""
+        # MP4BoxとFFmpegのパス設定を確認
+        config = self.wizard().config
+        if not config.has_option("Settings", "mp4box_path") or not config.has_option("Settings", "ffmpeg_path"):
+            QMessageBox.warning(self, "警告", "MP4BoxとFFmpegのパスを設定してください。")
+            return False
+
         # 入力ファイルと出力ファイルが選択されているか確認
         if not self.file_edit.text():
             QMessageBox.warning(self, "警告", "入力ファイルを選択してください。")
@@ -434,22 +440,19 @@ class MediaTagManagementPage(QWizardPage):
             # MP4Boxコマンドの構築
             args = [mp4box_path]
 
-            # 入力ファイルを指定（これが出力ファイルになる）
-            args.append(output_file)
-
-            # 映像とオーディオを追加
+            # 新しいMP4ファイルを作成
             args.extend(['-add', input_file])
 
             # 映像言語の設定
             video_lang = self.video_lang_combo.currentData()
-            args.extend(['-lang', '1=' + video_lang])  # 1はビデオトラックのID
+            args.extend(['-lang', '1=' + video_lang])
 
-            # オーディオ設定
-            for i, audio_setting in enumerate(self.audio_settings, start=2):  # 2から開始（1はビデオ）
+            # オーディオ言語とデフォルト設定
+            for i, audio_setting in enumerate(self.audio_settings):
                 lang_code = audio_setting['language'].currentData()
-                args.extend(['-lang', f'{i}={lang_code}'])
+                args.extend(['-lang', f'{i+2}={lang_code}'])
                 if audio_setting['default'].isChecked():
-                    args.extend(['-def', str(i)])
+                    args.extend(['-def', str(i+2)])
 
             # 字幕の処理
             subtitle_index = len(self.audio_settings) + 2  # ビデオ(1) + オーディオ数 + 1
@@ -466,8 +469,15 @@ class MediaTagManagementPage(QWizardPage):
                             dst.write(src.read())
                         temp_files.append(temp_subtitle)
 
-                        # 字幕の追加
-                        args.extend(['-add', f'{temp_subtitle}:lang={group["language"].currentData()}'])
+                        # 字幕の追加（字幕ファイルの種類に応じて適切なオプションを追加）
+                        ext = os.path.splitext(subtitle_file)[1].lower()
+                        if ext == '.srt':
+                            args.extend(['-add', f'{temp_subtitle}:fmt=tx3g'])
+                        else:
+                            args.extend(['-add', temp_subtitle])
+
+                        # 言語設定
+                        args.extend(['-lang', f'{subtitle_index}={group["language"].currentData()}'])
 
                         # デフォルトと強制フラグの設定
                         if group['default'].isChecked():
@@ -476,6 +486,9 @@ class MediaTagManagementPage(QWizardPage):
                             args.extend(['-force', str(subtitle_index)])
 
                         subtitle_index += 1
+
+            # 出力ファイルを指定
+            args.extend(['-new', '-out', output_file])
 
             # MP4Boxコマンドを実行
             print("MP4Box command:", ' '.join(args))
