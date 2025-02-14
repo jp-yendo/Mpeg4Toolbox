@@ -415,78 +415,47 @@ class MediaTagManagementPage(QWizardPage):
         temp_files = []  # 一時ファイルのパスを保持
 
         try:
-            # FFmpegのパスを設定
-            if not config.has_option("Settings", "ffmpeg_path"):
-                QMessageBox.critical(self, "エラー", "FFmpegの設定が見つかりません。")
+            # MP4Boxのパスを設定
+            if not config.has_option("Settings", "mp4box_path"):
+                QMessageBox.critical(self, "エラー", "MP4Boxの設定が見つかりません。")
                 return False
 
-            ffmpeg_path = config.get("Settings", "ffmpeg_path")
-            ffmpeg_dir = os.path.dirname(ffmpeg_path)
-            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+            mp4box_path = config.get("Settings", "mp4box_path")
+            mp4box_dir = os.path.dirname(mp4box_path)
+            os.environ["PATH"] = mp4box_dir + os.pathsep + os.environ["PATH"]
 
             # 一時ディレクトリの設定
             temp_dir = config.get("Settings", "temp_dir", fallback=get_default_temp_dir())
             os.makedirs(temp_dir, exist_ok=True)
 
-            # 入力ファイルのストリーム情報を取得
+            # 入力ファイルのストリーム情報を取得（FFmpegを使用）
             probe = ffmpeg.probe(input_file)
-            input_stream = ffmpeg.input(input_file)
-            metadata = {}
 
-            # 映像ストリームの設定
+            # MP4Boxコマンドの構築
+            args = [mp4box_path]
+
+            # 入力ファイルを指定（これが出力ファイルになる）
+            args.append(output_file)
+
+            # 映像とオーディオを追加
+            args.extend(['-add', input_file])
+
+            # 映像言語の設定
             video_lang = self.video_lang_combo.currentData()
-            metadata['metadata:s:v:0'] = f'language={video_lang}'
+            args.extend(['-lang', '1=' + video_lang])  # 1はビデオトラックのID
 
-            # オーディオストリームの設定
-            audio_index = 0
-            for audio_setting in self.audio_settings:
+            # オーディオ設定
+            for i, audio_setting in enumerate(self.audio_settings, start=2):  # 2から開始（1はビデオ）
                 lang_code = audio_setting['language'].currentData()
-                # オーディオストリームの言語設定
-                metadata[f'metadata:s:a:{audio_index}'] = f'language={lang_code}'
-                # デフォルトフラグの設定
+                args.extend(['-lang', f'{i}={lang_code}'])
                 if audio_setting['default'].isChecked():
-                    metadata[f'disposition:a:{audio_index}'] = 'default'
-                audio_index += 1
+                    args.extend(['-def', str(i)])
 
-            # 出力ファイルを一時ディレクトリに作成
-            temp_output = os.path.join(temp_dir, f"output_{uuid.uuid4().hex[:16]}.mp4")
-            temp_files.append(temp_output)
-
-            # 字幕がない場合は基本のストリームのみ処理
-            if not self.subtitle_groups:
-                args = [ffmpeg_path, '-i', input_file]
-                # 映像とオーディオのマッピング
-                args.extend(['-map', '0:v:0'])  # 映像
-                for audio_setting in self.audio_settings:
-                    args.extend(['-map', f'0:a:{audio_setting["audio_index"]}'])
-
-                # コーデックの設定
-                args.extend(['-c:v', 'copy'])  # ビデオコーデック
-                args.extend(['-c:a', 'copy'])  # オーディオコーデック
-
-                # 映像の言語設定
-                args.extend(['-metadata:s:v:0', f'language={video_lang}'])
-
-                # オーディオの言語とデフォルト設定
-                audio_index = 0
-                for audio_setting in self.audio_settings:
-                    lang_code = audio_setting['language'].currentData()
-                    args.extend([f'-metadata:s:a:{audio_index}', f'language={lang_code}'])
-                    if audio_setting['default'].isChecked():
-                        args.extend([f'-disposition:a:{audio_index}', 'default'])
-                    else:
-                        args.extend([f'-disposition:a:{audio_index}', '0'])
-                    audio_index += 1
-
-                args.extend(['-y', temp_output])
-            else:
-                # 字幕ストリームを処理
-                args = [ffmpeg_path, '-i', input_file]  # メインの入力ファイル
-
-                # 字幕ファイルの入力を追加
-                subtitle_files = []
-                for group in self.subtitle_groups:
-                    if not group.get('is_existing', False) and group['file'].text():
+            # 字幕の処理
+            subtitle_index = len(self.audio_settings) + 2  # ビデオ(1) + オーディオ数 + 1
+            for group in self.subtitle_groups:
+                if not group.get('is_existing', False):
+                    if group['file'].text():
                         subtitle_file = group['file'].text()
                         # 字幕ファイルを一時ディレクトリにコピー
                         temp_subtitle = os.path.join(
@@ -496,98 +465,34 @@ class MediaTagManagementPage(QWizardPage):
                         with open(subtitle_file, 'rb') as src, open(temp_subtitle, 'wb') as dst:
                             dst.write(src.read())
                         temp_files.append(temp_subtitle)
-                        subtitle_files.append(temp_subtitle)
-                        args.extend(['-i', temp_subtitle])
 
-                # ストリームのマッピング
-                args.extend(['-map', '0:v:0'])  # 映像
-                for audio_setting in self.audio_settings:
-                    args.extend(['-map', f'0:a:{audio_setting["audio_index"]}'])
+                        # 字幕の追加
+                        args.extend(['-add', f'{temp_subtitle}:lang={group["language"].currentData()}'])
 
-                # 字幕のマッピング
-                subtitle_index = 0
-                input_index = 1
-                for group in self.subtitle_groups:
-                    if group.get('is_existing', False):
-                        args.extend(['-map', f'0:s:{group["subtitle_index"]}'])
-                    else:
-                        if group['file'].text():
-                            args.extend(['-map', f'{input_index}:0'])
-                            input_index += 1
-                    subtitle_index += 1
+                        # デフォルトと強制フラグの設定
+                        if group['default'].isChecked():
+                            args.extend(['-def', str(subtitle_index)])
+                        if group['forced'].isChecked():
+                            args.extend(['-force', str(subtitle_index)])
 
-                # コーデックの設定
-                args.extend(['-c:v', 'copy'])  # ビデオコーデック
-                args.extend(['-c:a', 'copy'])  # オーディオコーデック
-                args.extend(['-c:s', 'mov_text'])  # 字幕コーデック
+                        subtitle_index += 1
 
-                # 映像の言語設定
-                args.extend(['-metadata:s:v:0', f'language={video_lang}'])
-
-                # オーディオの言語とデフォルト設定
-                audio_index = 0
-                for audio_setting in self.audio_settings:
-                    lang_code = audio_setting['language'].currentData()
-                    args.extend([f'-metadata:s:a:{audio_index}', f'language={lang_code}'])
-                    if audio_setting['default'].isChecked():
-                        args.extend([f'-disposition:a:{audio_index}', 'default'])
-                    else:
-                        args.extend([f'-disposition:a:{audio_index}', '0'])
-                    audio_index += 1
-
-                # 字幕の言語とフラグ設定
-                subtitle_index = 0
-                for group in self.subtitle_groups:
-                    lang_code = group['language'].currentData()
-                    # 言語設定
-                    args.extend([f'-metadata:s:s:{subtitle_index}', f'language={lang_code}'])
-                    args.extend([f'-metadata:s:s:{subtitle_index}', f'title={group["language"].currentText()}'])
-
-                    # デフォルトと強制フラグ
-                    disposition = []
-                    if group['default'].isChecked():
-                        disposition.append('default')
-                    if group['forced'].isChecked():
-                        disposition.append('forced')
-
-                    if disposition:
-                        args.extend([f'-disposition:s:{subtitle_index}', '+'.join(disposition)])
-                    else:
-                        args.extend([f'-disposition:s:{subtitle_index}', '0'])
-
-                    # 関連付けられたオーディオ
-                    audio_index = group['audio'].currentData()
-                    if audio_index is not None:
-                        args.extend([f'-metadata:s:s:{subtitle_index}', f'audio_track={audio_index}'])
-
-                    subtitle_index += 1
-
-                args.extend(['-y', temp_output])
-
-            # FFmpegコマンドを実行
-            print("FFmpeg command:", ' '.join(args))
+            # MP4Boxコマンドを実行
+            print("MP4Box command:", ' '.join(args))
             process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
 
             if process.returncode != 0:
                 error_message = stderr.decode() if stderr else "不明なエラー"
-                print("FFmpeg error output:", error_message)
-                raise ffmpeg.Error('FFmpeg error', stdout, stderr)
-
-            # 成功したら一時ファイルを最終出力先に移動
-            os.replace(temp_output, output_file)
+                print("MP4Box error output:", error_message)
+                raise Exception(error_message)
 
             QMessageBox.information(self, "成功", "メディアファイルの処理が完了しました。")
             return True
 
-        except ffmpeg.Error as e:
-            error_detail = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else str(e)
-            QMessageBox.critical(self, "エラー",
-                               f"メディアファイルの処理に失敗しました:\n{error_detail}")
-            return False
         except Exception as e:
             QMessageBox.critical(self, "エラー",
-                               f"予期せぬエラーが発生しました:\n{str(e)}")
+                               f"メディアファイルの処理に失敗しました:\n{str(e)}")
             return False
         finally:
             # 一時ファイルの削除

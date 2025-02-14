@@ -14,7 +14,7 @@ class TaskSelectionPage(QWizardPage):
         self.tasks = [
             ("info", "詳細情報表示"),
             ("subtitle", "字幕・タグ管理"),
-            ("settings", "FFmpeg設定")
+            ("settings", "メディアツール設定")
         ]
 
         self.task_buttons = []
@@ -69,10 +69,11 @@ class TaskSelectionPage(QWizardPage):
         current_task = self.selected_task.text()
         wizard = self.wizard()
 
-        # FFmpegの設定が必要なタスクの場合
+        # メディアツールの設定が必要なタスクの場合
         if current_task in ["info", "subtitle"]:
-            if not wizard.config.has_option("Settings", "ffmpeg_path"):
-                QMessageBox.warning(self, "警告", "先にFFmpegの設定を行ってください。")
+            if not (wizard.config.has_option("Settings", "mp4box_path") and
+                   wizard.config.has_option("Settings", "ffmpeg_path")):
+                QMessageBox.warning(self, "警告", "先にメディアツールの設定を行ってください。")
                 return False
 
         return True
@@ -83,14 +84,16 @@ class TaskSelectionPage(QWizardPage):
         wizard = self.wizard()
 
         if current_task == "info":
-            if not wizard.config.has_option("Settings", "ffmpeg_path"):
-                return wizard.ffmpeg_settings_page_id
+            if not (wizard.config.has_option("Settings", "mp4box_path") and
+                   wizard.config.has_option("Settings", "ffmpeg_path")):
+                return wizard.media_tool_settings_page_id
             return wizard.media_info_page_id
         elif current_task == "subtitle":
-            if not wizard.config.has_option("Settings", "ffmpeg_path"):
-                return wizard.ffmpeg_settings_page_id
+            if not (wizard.config.has_option("Settings", "mp4box_path") and
+                   wizard.config.has_option("Settings", "ffmpeg_path")):
+                return wizard.media_tool_settings_page_id
             return wizard.subtitle_management_page_id
         elif current_task == "settings":
-            return wizard.ffmpeg_settings_page_id
+            return wizard.media_tool_settings_page_id
 
         return -1

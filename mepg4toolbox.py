@@ -2,7 +2,7 @@ import sys
 import os
 import configparser
 from PyQt5.QtWidgets import QApplication, QWizard
-from modules import (FFmpegSettingsPage, TaskSelectionPage, MediaInfoPage,
+from modules import (MediaToolSettingsPage, TaskSelectionPage, MediaInfoPage,
                     MediaTagManagementPage)
 
 class Mpeg4Wizard(QWizard):
@@ -23,13 +23,13 @@ class Mpeg4Wizard(QWizard):
 
         # ページの追加
         self.task_selection_page = TaskSelectionPage()
-        self.ffmpeg_settings_page = FFmpegSettingsPage()
+        self.media_tool_settings_page = MediaToolSettingsPage()
         self.media_info_page = MediaInfoPage()
         self.subtitle_management_page = MediaTagManagementPage()
 
         # ページIDを保存
         self.task_selection_page_id = self.addPage(self.task_selection_page)
-        self.ffmpeg_settings_page_id = self.addPage(self.ffmpeg_settings_page)
+        self.media_tool_settings_page_id = self.addPage(self.media_tool_settings_page)
         self.media_info_page_id = self.addPage(self.media_info_page)
         self.subtitle_management_page_id = self.addPage(self.subtitle_management_page)
 
@@ -89,7 +89,7 @@ class Mpeg4Wizard(QWizard):
                 QWizard.NextButton,
                 QWizard.CancelButton
             ])
-        elif current_page == self.ffmpeg_settings_page:
+        elif current_page == self.media_tool_settings_page:
             self.setButtonLayout([
                 QWizard.BackButton,
                 QWizard.Stretch,
