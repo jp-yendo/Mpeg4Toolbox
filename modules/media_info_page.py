@@ -2,7 +2,7 @@ import os
 import ffmpeg
 from PyQt5.QtWidgets import (QWizardPage, QLabel, QVBoxLayout, QHBoxLayout,
                             QLineEdit, QPushButton, QTextEdit, QFileDialog,
-                            QMessageBox)
+                            QMessageBox, QWizard)
 from .utils import format_duration, format_bitrate
 
 class MediaInfoPage(QWizardPage):
@@ -55,7 +55,7 @@ class MediaInfoPage(QWizardPage):
     def browse_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "メディアファイルの選択", "",
-            "メディアファイル (*.mp4 *.m4v);;すべてのファイル (*.*)")
+            "メディアファイル (*.mp4 *.m4v *.mkv);;すべてのファイル (*.*)")
         if file_path:
             self.file_edit.setText(file_path)
             self.show_media_info(file_path)

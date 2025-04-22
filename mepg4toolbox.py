@@ -89,21 +89,20 @@ class Mpeg4Wizard(QWizard):
                 QWizard.NextButton,
                 QWizard.CancelButton
             ])
-        elif current_page == self.media_tool_settings_page:
-            self.setButtonLayout([
-                QWizard.BackButton,
-                QWizard.Stretch,
-                QWizard.FinishButton,
-                QWizard.CancelButton
-            ])
         elif current_page == self.media_info_page:
             self.setButtonLayout([
                 QWizard.BackButton,
                 QWizard.Stretch,
-                QWizard.FinishButton,
                 QWizard.CancelButton
             ])
         elif current_page == self.subtitle_management_page:
+            self.setButtonLayout([
+                QWizard.BackButton,
+                QWizard.Stretch,
+                QWizard.FinishButton,
+                QWizard.CancelButton
+            ])
+        elif current_page == self.media_tool_settings_page:
             self.setButtonLayout([
                 QWizard.BackButton,
                 QWizard.Stretch,
