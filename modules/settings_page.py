@@ -1,6 +1,6 @@
 import os
 from PyQt5.QtWidgets import (QWizardPage, QLabel, QVBoxLayout, QPushButton,
-                            QLineEdit, QFileDialog, QMessageBox, QGroupBox)
+                            QLineEdit, QFileDialog, QMessageBox, QGroupBox, QHBoxLayout, QWizard)
 from .utils import get_default_temp_dir
 
 class MediaToolSettingsPage(QWizardPage):
@@ -14,36 +14,56 @@ class MediaToolSettingsPage(QWizardPage):
         # MP4Boxパス設定
         mp4box_group = QGroupBox("MP4Box実行ファイル")
         mp4box_layout = QVBoxLayout()
+        mp4box_path_layout = QHBoxLayout()
         self.mp4box_path_edit = QLineEdit()
         self.mp4box_browse_button = QPushButton("参照...")
         self.mp4box_browse_button.clicked.connect(self.browse_mp4box)
-        mp4box_layout.addWidget(QLabel("MP4Boxのパス:"))
-        mp4box_layout.addWidget(self.mp4box_path_edit)
-        mp4box_layout.addWidget(self.mp4box_browse_button)
+        mp4box_path_layout.addWidget(QLabel("MP4Boxのパス:"))
+        mp4box_path_layout.addWidget(self.mp4box_path_edit)
+        mp4box_path_layout.addWidget(self.mp4box_browse_button)
+        mp4box_layout.addLayout(mp4box_path_layout)
         mp4box_group.setLayout(mp4box_layout)
         layout.addWidget(mp4box_group)
 
         # FFmpegパス設定
         ffmpeg_group = QGroupBox("FFmpeg実行ファイル")
         ffmpeg_layout = QVBoxLayout()
+        ffmpeg_path_layout = QHBoxLayout()
         self.ffmpeg_path_edit = QLineEdit()
         self.ffmpeg_browse_button = QPushButton("参照...")
         self.ffmpeg_browse_button.clicked.connect(self.browse_ffmpeg)
-        ffmpeg_layout.addWidget(QLabel("FFmpegのパス:"))
-        ffmpeg_layout.addWidget(self.ffmpeg_path_edit)
-        ffmpeg_layout.addWidget(self.ffmpeg_browse_button)
+        ffmpeg_path_layout.addWidget(QLabel("FFmpegのパス:"))
+        ffmpeg_path_layout.addWidget(self.ffmpeg_path_edit)
+        ffmpeg_path_layout.addWidget(self.ffmpeg_browse_button)
+        ffmpeg_layout.addLayout(ffmpeg_path_layout)
         ffmpeg_group.setLayout(ffmpeg_layout)
         layout.addWidget(ffmpeg_group)
+
+        # MKVToolNixパス設定
+        mkv_group = QGroupBox("MKVToolNix実行ファイル")
+        mkv_layout = QVBoxLayout()
+        mkv_path_layout = QHBoxLayout()
+        self.mkv_path_edit = QLineEdit()
+        self.mkv_browse_button = QPushButton("参照...")
+        self.mkv_browse_button.clicked.connect(self.browse_mkv)
+        mkv_path_layout.addWidget(QLabel("MKVToolNixのパス:"))
+        mkv_path_layout.addWidget(self.mkv_path_edit)
+        mkv_path_layout.addWidget(self.mkv_browse_button)
+        mkv_layout.addLayout(mkv_path_layout)
+        mkv_group.setLayout(mkv_layout)
+        layout.addWidget(mkv_group)
 
         # 一時ディレクトリ設定
         temp_group = QGroupBox("作業ディレクトリ")
         temp_layout = QVBoxLayout()
+        temp_path_layout = QHBoxLayout()
         self.temp_edit = QLineEdit()
         self.temp_browse_button = QPushButton("参照...")
         self.temp_browse_button.clicked.connect(self.browse_temp_dir)
-        temp_layout.addWidget(QLabel("一時ファイル出力先:"))
-        temp_layout.addWidget(self.temp_edit)
-        temp_layout.addWidget(self.temp_browse_button)
+        temp_path_layout.addWidget(QLabel("一時ファイル出力先:"))
+        temp_path_layout.addWidget(self.temp_edit)
+        temp_path_layout.addWidget(self.temp_browse_button)
+        temp_layout.addLayout(temp_path_layout)
         temp_group.setLayout(temp_layout)
         layout.addWidget(temp_group)
 
@@ -52,6 +72,7 @@ class MediaToolSettingsPage(QWizardPage):
         # 必須フィールドとして設定
         self.registerField("mp4box_path*", self.mp4box_path_edit)
         self.registerField("ffmpeg_path*", self.ffmpeg_path_edit)
+        self.registerField("mkv_path*", self.mkv_path_edit)
         self.registerField("temp_dir*", self.temp_edit)
 
     def initializePage(self):
@@ -61,6 +82,8 @@ class MediaToolSettingsPage(QWizardPage):
             self.mp4box_path_edit.setText(config.get("Settings", "mp4box_path"))
         if config.has_option("Settings", "ffmpeg_path"):
             self.ffmpeg_path_edit.setText(config.get("Settings", "ffmpeg_path"))
+        if config.has_option("Settings", "mkv_path"):
+            self.mkv_path_edit.setText(config.get("Settings", "mkv_path"))
         if config.has_option("Settings", "temp_dir"):
             self.temp_edit.setText(config.get("Settings", "temp_dir"))
         else:
@@ -68,11 +91,15 @@ class MediaToolSettingsPage(QWizardPage):
             default_temp = get_default_temp_dir()
             self.temp_edit.setText(default_temp)
 
+        # 完了ボタンのテキストを「完了」に設定
+        self.wizard().setButtonText(QWizard.FinishButton, "完了")
+
     def validatePage(self):
         """ページの検証と遷移制御"""
         # 設定を保存
         mp4box_path = self.mp4box_path_edit.text()
         ffmpeg_path = self.ffmpeg_path_edit.text()
+        mkv_path = self.mkv_path_edit.text()
         temp_dir = self.temp_edit.text()
         wizard = self.wizard()
 
@@ -86,6 +113,7 @@ class MediaToolSettingsPage(QWizardPage):
         # 設定を保存
         wizard.config.set("Settings", "mp4box_path", mp4box_path)
         wizard.config.set("Settings", "ffmpeg_path", ffmpeg_path)
+        wizard.config.set("Settings", "mkv_path", mkv_path)
         wizard.config.set("Settings", "temp_dir", temp_dir)
         wizard.save_config()
         return True
@@ -116,6 +144,13 @@ class MediaToolSettingsPage(QWizardPage):
             "実行ファイル (ffmpeg.exe);;すべてのファイル (*.*)")
         if file_path:
             self.ffmpeg_path_edit.setText(file_path)
+
+    def browse_mkv(self):
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "MKVToolNixのディレクトリを選択",
+            self.mkv_path_edit.text() or "")
+        if dir_path:
+            self.mkv_path_edit.setText(dir_path)
 
     def browse_temp_dir(self):
         dir_path = QFileDialog.getExistingDirectory(

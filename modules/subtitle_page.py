@@ -17,6 +17,12 @@ class MediaTagManagementPage(QWizardPage):
         self.setSubTitle("メディアファイルの言語設定とメタデータを管理します")
         self.subtitle_groups = []
 
+        # ドラッグ＆ドロップを有効化
+        self.setAcceptDrops(True)
+        # ドラッグ＆ドロップイベントを接続
+        self.dragEnterEvent = self.page_dragEnterEvent
+        self.dropEvent = self.page_dropEvent
+
         # メインレイアウト
         main_layout = QVBoxLayout()
 
@@ -78,6 +84,9 @@ class MediaTagManagementPage(QWizardPage):
         # スクロール可能な字幕グループコンテナ
         scroll = QScrollArea()
         self.subtitle_container = QWidget()
+        self.subtitle_container.setAcceptDrops(True)  # 字幕コンテナでドロップを受け入れる
+        self.subtitle_container.dragEnterEvent = self.subtitle_dragEnterEvent
+        self.subtitle_container.dropEvent = self.subtitle_dropEvent
         self.subtitle_layout = QVBoxLayout(self.subtitle_container)
         scroll.setWidget(self.subtitle_container)
         scroll.setWidgetResizable(True)
@@ -91,6 +100,216 @@ class MediaTagManagementPage(QWizardPage):
 
         # レイアウトを保持
         self.audio_layout = audio_layout
+
+    def page_dragEnterEvent(self, event):
+        """ドラッグされたファイルを受け入れるかどうかを判断"""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                ext = os.path.splitext(file_path)[1].lower()
+                # メディアファイルまたは字幕ファイルの場合のみ受け入れる
+                if ext in ['.mp4', '.m4v', '.mkv'] or ext in ['.srt', '.ass', '.ssa', '.txt', '.vtt', '.smi', '.sup', '.dvb', '.ttx', '.tx3g']:
+                    event.acceptProposedAction()
+
+    def page_dropEvent(self, event):
+        """ドロップされたファイルを処理"""
+        urls = event.mimeData().urls()
+        if urls:
+            file_path = urls[0].toLocalFile()
+            ext = os.path.splitext(file_path)[1].lower()
+
+            # メディアファイルの場合
+            if ext in ['.mp4', '.m4v', '.mkv']:
+                self.file_edit.setText(file_path)
+                # 出力ファイル名を自動設定
+                dir_name = os.path.dirname(file_path)
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                self.output_edit.setText(os.path.join(dir_name, f"{base_name}_output.mp4"))
+
+                # ファイル情報を更新
+                self.update_file_info(file_path)
+            # 字幕ファイルの場合
+            elif ext in ['.srt', '.ass', '.ssa', '.txt', '.vtt', '.smi', '.sup', '.dvb', '.ttx', '.tx3g']:
+                self.add_subtitle_with_file(file_path)
+            else:
+                QMessageBox.warning(self, "警告", "サポートされていないファイル形式です。")
+
+    def subtitle_dragEnterEvent(self, event):
+        """字幕ペインでのドラッグイベント"""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                ext = os.path.splitext(file_path)[1].lower()
+                # 字幕ファイルの場合のみ受け入れる
+                if ext in ['.srt', '.ass', '.ssa', '.txt', '.vtt', '.smi', '.sup', '.dvb', '.ttx', '.tx3g']:
+                    event.acceptProposedAction()
+
+    def subtitle_dropEvent(self, event):
+        """字幕ペインでのドロップイベント"""
+        urls = event.mimeData().urls()
+        if urls:
+            file_path = urls[0].toLocalFile()
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in ['.srt', '.ass', '.ssa', '.txt', '.vtt', '.smi', '.sup', '.dvb', '.ttx', '.tx3g']:
+                self.add_subtitle_with_file(file_path)
+            else:
+                QMessageBox.warning(self, "警告", "サポートされていない字幕ファイル形式です。")
+
+    def add_subtitle_with_file(self, file_path):
+        """字幕ファイルを追加"""
+        group = QGroupBox(f"字幕 #{len(self.subtitle_groups) + 1}")
+        layout = QVBoxLayout()
+
+        # 字幕ファイル選択
+        file_layout = QHBoxLayout()
+        file_edit = QLineEdit()
+        file_edit.setReadOnly(True)
+        file_edit.setText(file_path)  # ドロップされたファイルのパスを設定
+        browse_button = QPushButton("字幕を選択...")
+        browse_button.clicked.connect(lambda: self.browse_subtitle(file_edit))
+        file_layout.addWidget(QLabel("字幕ファイル:"))
+        file_layout.addWidget(file_edit)
+        file_layout.addWidget(browse_button)
+        layout.addLayout(file_layout)
+
+        # 言語選択
+        lang_layout = QHBoxLayout()
+        lang_layout.addWidget(QLabel("言語:"))
+        lang_combo = QComboBox()
+        for code, name in LANGUAGES:
+            lang_combo.addItem(f"{name} ({code})", code)
+        lang_layout.addWidget(lang_combo)
+        layout.addLayout(lang_layout)
+
+        # 関連付けるオーディオ選択
+        audio_layout = QHBoxLayout()
+        audio_combo = QComboBox()
+        audio_combo.addItem("なし", None)
+        audio_layout.addWidget(QLabel("関連付けるオーディオ:"))
+        audio_layout.addWidget(audio_combo)
+        layout.addLayout(audio_layout)
+
+        # フラグ設定
+        flags_layout = QHBoxLayout()
+        output_check = QCheckBox("出力")
+        output_check.setChecked(True)  # デフォルトで出力対象
+        default_check = QCheckBox("デフォルト字幕")
+        forced_check = QCheckBox("強制字幕")
+        flags_layout.addWidget(output_check)
+        flags_layout.addWidget(default_check)
+        flags_layout.addWidget(forced_check)
+        flags_layout.addStretch()
+        layout.addLayout(flags_layout)
+
+        # 削除ボタン
+        delete_button = QPushButton("この字幕を削除")
+        delete_button.clicked.connect(lambda: self.remove_subtitle_group(group))
+        layout.addWidget(delete_button)
+
+        group.setLayout(layout)
+        self.subtitle_layout.addWidget(group)
+        self.subtitle_groups.append({
+            'group': group,
+            'file': file_edit,
+            'language': lang_combo,
+            'audio': audio_combo,
+            'default': default_check,
+            'forced': forced_check,
+            'output': output_check
+        })
+
+        # オーディオストリーム情報を更新
+        if self.file_edit.text():
+            self.update_audio_streams(self.file_edit.text())
+
+    def update_file_info(self, file_path):
+        """ファイル情報を更新"""
+        try:
+            # FFmpegのパスを設定
+            config = self.wizard().config
+            if config.has_option("Settings", "ffmpeg_path"):
+                ffmpeg_dir = os.path.dirname(config.get("Settings", "ffmpeg_path"))
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+
+            # メディア情報を取得
+            probe = ffmpeg.probe(file_path)
+
+            # 映像言語を設定
+            detected_video_lang = "未設定"
+            video_info_text = []
+            for stream in probe['streams']:
+                if stream['codec_type'] == 'video':
+                    # コーデック情報
+                    if 'codec_name' in stream:
+                        video_info_text.append(f"コーデック: {stream['codec_name']}")
+                    if 'profile' in stream:
+                        video_info_text.append(f"プロファイル: {stream['profile']}")
+                    if 'level' in stream:
+                        video_info_text.append(f"レベル: {stream['level']}")
+
+                    # 解像度とフレームレート
+                    if 'width' in stream and 'height' in stream:
+                        video_info_text.append(f"解像度: {stream['width']}x{stream['height']}")
+                    if 'r_frame_rate' in stream:
+                        num, den = map(int, stream['r_frame_rate'].split('/'))
+                        fps = num / den if den != 0 else 0
+                        video_info_text.append(f"フレームレート: {fps:.2f}fps")
+
+                    # ビットレートとその他の情報
+                    if 'bit_rate' in stream:
+                        bit_rate = int(stream['bit_rate'])
+                        video_info_text.append(f"ビットレート: {bit_rate//1000}kbps")
+                    if 'pix_fmt' in stream:
+                        video_info_text.append(f"ピクセルフォーマット: {stream['pix_fmt']}")
+                    if 'color_space' in stream:
+                        video_info_text.append(f"カラースペース: {stream['color_space']}")
+                    if 'color_transfer' in stream:
+                        video_info_text.append(f"カラートランスファー: {stream['color_transfer']}")
+                    if 'color_primaries' in stream:
+                        video_info_text.append(f"カラープライマリ: {stream['color_primaries']}")
+
+                    # 言語設定
+                    if 'tags' in stream and 'language' in stream['tags']:
+                        lang = stream['tags']['language']
+                        detected_video_lang = lang
+                        index = self.video_lang_combo.findData(lang)
+                        if index >= 0:
+                            self.video_lang_combo.setCurrentIndex(index)
+                        else:
+                            # 言語コードが見つからない場合は'und'を設定
+                            index = self.video_lang_combo.findData('und')
+                            if index >= 0:
+                                self.video_lang_combo.setCurrentIndex(index)
+                    break
+            self.video_lang_label.setText(f"検出: {detected_video_lang}")
+            # 映像情報を表示
+            for widget in self.findChildren(QLabel):
+                if widget.parent() and isinstance(widget.parent(), QGroupBox) and widget.parent().title() == "映像設定":
+                    widget.setText(" | ".join(video_info_text))
+                    break
+
+            # 既存の字幕グループをクリア
+            for group in self.subtitle_groups:
+                group['group'].deleteLater()
+            self.subtitle_groups.clear()
+
+            # オーディオ設定を更新
+            self.update_audio_settings(probe)
+
+            # 既存の字幕を追加
+            self.update_existing_subtitles(probe)
+
+            # オーディオストリーム情報を更新
+            self.update_audio_streams(file_path)
+
+        except ffmpeg.Error as e:
+            QMessageBox.warning(self, "警告",
+                              f"メディア情報の取得に失敗しました:\n{str(e)}")
+        except Exception as e:
+            QMessageBox.warning(self, "警告",
+                              f"予期せぬエラーが発生しました:\n{str(e)}")
 
     def initializePage(self):
         """ページの初期化"""
@@ -397,90 +616,8 @@ class MediaTagManagementPage(QWizardPage):
             base_name = os.path.splitext(os.path.basename(file_path))[0]
             self.output_edit.setText(os.path.join(dir_name, f"{base_name}_output.mp4"))
 
-            try:
-                # FFmpegのパスを設定
-                config = self.wizard().config
-                if config.has_option("Settings", "ffmpeg_path"):
-                    ffmpeg_dir = os.path.dirname(config.get("Settings", "ffmpeg_path"))
-                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
-
-                # メディア情報を取得
-                probe = ffmpeg.probe(file_path)
-
-                # 映像言語を設定
-                detected_video_lang = "未設定"
-                video_info_text = []
-                for stream in probe['streams']:
-                    if stream['codec_type'] == 'video':
-                        # コーデック情報
-                        if 'codec_name' in stream:
-                            video_info_text.append(f"コーデック: {stream['codec_name']}")
-                        if 'profile' in stream:
-                            video_info_text.append(f"プロファイル: {stream['profile']}")
-                        if 'level' in stream:
-                            video_info_text.append(f"レベル: {stream['level']}")
-
-                        # 解像度とフレームレート
-                        if 'width' in stream and 'height' in stream:
-                            video_info_text.append(f"解像度: {stream['width']}x{stream['height']}")
-                        if 'r_frame_rate' in stream:
-                            num, den = map(int, stream['r_frame_rate'].split('/'))
-                            fps = num / den if den != 0 else 0
-                            video_info_text.append(f"フレームレート: {fps:.2f}fps")
-
-                        # ビットレートとその他の情報
-                        if 'bit_rate' in stream:
-                            bit_rate = int(stream['bit_rate'])
-                            video_info_text.append(f"ビットレート: {bit_rate//1000}kbps")
-                        if 'pix_fmt' in stream:
-                            video_info_text.append(f"ピクセルフォーマット: {stream['pix_fmt']}")
-                        if 'color_space' in stream:
-                            video_info_text.append(f"カラースペース: {stream['color_space']}")
-                        if 'color_transfer' in stream:
-                            video_info_text.append(f"カラートランスファー: {stream['color_transfer']}")
-                        if 'color_primaries' in stream:
-                            video_info_text.append(f"カラープライマリ: {stream['color_primaries']}")
-
-                        # 言語設定
-                        if 'tags' in stream and 'language' in stream['tags']:
-                            lang = stream['tags']['language']
-                            detected_video_lang = lang
-                            index = self.video_lang_combo.findData(lang)
-                            if index >= 0:
-                                self.video_lang_combo.setCurrentIndex(index)
-                            else:
-                                # 言語コードが見つからない場合は'und'を設定
-                                index = self.video_lang_combo.findData('und')
-                                if index >= 0:
-                                    self.video_lang_combo.setCurrentIndex(index)
-                        break
-                self.video_lang_label.setText(f"検出: {detected_video_lang}")
-                # 映像情報を表示
-                for widget in self.findChildren(QLabel):
-                    if widget.parent() and isinstance(widget.parent(), QGroupBox) and widget.parent().title() == "映像設定":
-                        widget.setText(" | ".join(video_info_text))
-                        break
-
-                # 既存の字幕グループをクリア
-                for group in self.subtitle_groups:
-                    group['group'].deleteLater()
-                self.subtitle_groups.clear()
-
-                # オーディオ設定を更新
-                self.update_audio_settings(probe)
-
-                # 既存の字幕を追加
-                self.update_existing_subtitles(probe)
-
-                # オーディオストリーム情報を更新
-                self.update_audio_streams(file_path)
-
-            except ffmpeg.Error as e:
-                QMessageBox.warning(self, "警告",
-                                  f"メディア情報の取得に失敗しました:\n{str(e)}")
-            except Exception as e:
-                QMessageBox.warning(self, "警告",
-                                  f"予期せぬエラーが発生しました:\n{str(e)}")
+            # ファイル情報を更新
+            self.update_file_info(file_path)
 
     def browse_output(self):
         """出力ファイルを選択"""
@@ -572,6 +709,7 @@ class MediaTagManagementPage(QWizardPage):
         output_file = self.output_edit.text()
         config = self.wizard().config
         temp_files = []  # 一時ファイルのパスを保持
+        progress_dialog = None
 
         try:
             # MP4Boxのパスを設定
@@ -654,6 +792,7 @@ class MediaTagManagementPage(QWizardPage):
             progress_dialog.setText("MP4Boxでファイルを処理中...")
             progress_dialog.setStandardButtons(QMessageBox.NoButton)
             progress_dialog.show()
+            QApplication.processEvents()
 
             # MP4Boxコマンドを実行
             process = subprocess.Popen(
@@ -661,6 +800,8 @@ class MediaTagManagementPage(QWizardPage):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
+                encoding='utf-8',
+                errors='replace',
                 bufsize=1
             )
 
@@ -677,10 +818,8 @@ class MediaTagManagementPage(QWizardPage):
             stderr_output = process.stderr.read()
             if process.returncode != 0:
                 error_message = stderr_output if stderr_output else "不明なエラー"
-                progress_dialog.close()
                 raise Exception(error_message)
 
-            progress_dialog.close()
             QMessageBox.information(self, "成功", "メディアファイルの処理が完了しました。")
             return True
 
@@ -696,6 +835,11 @@ class MediaTagManagementPage(QWizardPage):
                         os.remove(temp_file)
                 except Exception as e:
                     pass
+
+            # プログレスダイアログを閉じる
+            if progress_dialog:
+                progress_dialog.close()
+                progress_dialog = None
 
     def export_subtitle(self, stream):
         """字幕ストリームをエクスポート"""
@@ -713,7 +857,7 @@ class MediaTagManagementPage(QWizardPage):
                 'ssa': 'ssa',
                 'mov_text': 'txt',
                 'text': 'txt',
-                'dvd_subtitle': 'sup',
+                'dvd_subtitle': 'sub',  # DVD字幕の拡張子を.subに変更
                 'hdmv_pgs_subtitle': 'sup',
                 'dvb_subtitle': 'dvb',
                 'dvb_teletext': 'ttx',
@@ -726,116 +870,131 @@ class MediaTagManagementPage(QWizardPage):
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "字幕のエクスポート",
                 f"{base_name}_subtitle_{stream_index}.{default_ext}",
-                "字幕ファイル (*.srt *.ass *.ssa *.txt *.vtt *.smi *.sup *.dvb *.ttx *.tx3g);;すべてのファイル (*.*)"
+                "字幕ファイル (*.srt *.ass *.ssa *.txt *.vtt *.smi *.sup *.dvb *.ttx *.tx3g *.sub);;すべてのファイル (*.*)"
             )
 
             if file_path:
-                # FFmpegで字幕をエクスポート
-                config = self.wizard().config
-                if config.has_option("Settings", "ffmpeg_path"):
-                    ffmpeg_dir = os.path.dirname(config.get("Settings", "ffmpeg_path"))
-                    os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+                # ファイル形式に応じて適切なツールを選択
+                file_ext = os.path.splitext(input_file)[1].lower()
 
-                # 進捗表示用のダイアログを作成
-                progress_dialog = QMessageBox(self)
-                progress_dialog.setWindowTitle("処理中")
-                progress_dialog.setText("字幕をエクスポート中...")
-                progress_dialog.setStandardButtons(QMessageBox.NoButton)
-                progress_dialog.show()
-
-                # コーデックに応じた出力形式を設定
-                output_format = {
-                    'subrip': 'srt',
-                    'ass': 'ass',
-                    'ssa': 'ssa',
-                    'mov_text': 'text',
-                    'text': 'text',
-                    'dvd_subtitle': 'dvdsub',
-                    'hdmv_pgs_subtitle': 'copy',
-                    'dvb_subtitle': 'dvbsub',
-                    'dvb_teletext': 'dvbtxt',
-                    'webvtt': 'webvtt',
-                    'sami': 'sami',
-                    'tx3g': 'tx3g'
-                }.get(codec_name, 'copy')
-
-                # FFmpegコマンドを構築
-                ffmpeg_args = [
-                    'ffmpeg', '-i', input_file,
-                    '-map', f'0:{stream_index}'
-                ]
-
-                # 出力形式に応じたエンコーダーオプションを追加
-                if output_format != 'copy':
-                    ffmpeg_args.extend(['-c:s', output_format])
+                if file_ext == '.mkv':
+                    # MKVファイルの場合はMKVToolNixを使用
+                    self._export_subtitle_mkv(input_file, stream_index, file_path)
                 else:
-                    ffmpeg_args.extend(['-c:s', 'copy'])
+                    # その他のファイル（MP4など）の場合はMP4Boxを使用
+                    self._export_subtitle_mp4box(input_file, stream_index, file_path)
 
-                # 特殊な形式の場合の追加オプション
-                if codec_name in ['dvd_subtitle', 'hdmv_pgs_subtitle']:
-                    # SUP形式の場合、フレームレートを指定
-                    ffmpeg_args.extend(['-r', '23.976'])
-
-                ffmpeg_args.append(file_path)
-
-                # コマンドを表示
-                print("\nFFmpegコマンド:")
-                print(" ".join(ffmpeg_args))
-
-                # FFmpegコマンドを実行
-                process = subprocess.Popen(
-                    ffmpeg_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    universal_newlines=True,
-                    bufsize=1,
-                    creationflags=subprocess.CREATE_NO_WINDOW  # Windowsの場合、コンソールウィンドウを表示しない
-                )
-
-                # 進捗情報を表示（タイムアウト付き）
-                import time
-                start_time = time.time()
-                timeout = 30  # 30秒のタイムアウト
-
-                while True:
-                    # タイムアウトチェック
-                    if time.time() - start_time > timeout:
-                        process.kill()
-                        progress_dialog.close()
-                        raise Exception("処理がタイムアウトしました")
-
-                    # プロセスの状態をチェック
-                    if process.poll() is not None:
-                        break
-
-                    # 出力を読み取り
-                    output = process.stdout.readline()
-                    if output:
-                        progress_dialog.setText(f"字幕をエクスポート中...\n\n{output.strip()}")
-                        QApplication.processEvents()
-
-                    # エラー出力をチェック
-                    error = process.stderr.readline()
-                    if error:
-                        progress_dialog.setText(f"字幕をエクスポート中...\n\nエラー: {error.strip()}")
-                        QApplication.processEvents()
-
-                    # 少し待機してCPU負荷を下げる
-                    time.sleep(0.1)
-
-                # 残りのエラー出力を確認
-                stderr_output = process.stderr.read()
-                if process.returncode != 0:
-                    error_message = stderr_output if stderr_output else "不明なエラー"
-                    progress_dialog.close()
-                    raise Exception(error_message)
-
-                progress_dialog.close()
                 QMessageBox.information(self, "成功", "字幕のエクスポートが完了しました。")
 
         except Exception as e:
             QMessageBox.critical(self, "エラー",
                                f"字幕のエクスポートに失敗しました:\n{str(e)}")
+
+    def _export_subtitle_mkv(self, input_file, stream_index, output_file):
+        """MKVToolNixを使用して字幕をエクスポート"""
+        config = self.wizard().config
+        if not config.has_option("Settings", "mkv_path"):
+            raise Exception("MKVToolNixの設定が見つかりません。")
+
+        mkv_dir = config.get("Settings", "mkv_path")
+        # MKVToolNixの実行ファイル名を付与
+        mkv_path = os.path.join(mkv_dir, "mkvextract.exe")
+
+        # 実行ファイルが存在するか確認
+        if not os.path.exists(mkv_path):
+            raise Exception(f"MKVToolNixの実行ファイルが見つかりません: {mkv_path}")
+
+        os.environ["PATH"] = mkv_dir + os.pathsep + os.environ["PATH"]
+
+        # MKVToolNixコマンドを構築
+        # MKVToolNixでは字幕ストリームのインデックスは0から始まる
+        # 正しい形式: mkvextract 入力ファイル トラックID:出力ファイル
+        args = [
+            mkv_path,
+            "tracks",  # トラック抽出モードを指定
+            input_file,
+            f"{stream_index}:{output_file}"
+        ]
+
+        # コマンドを表示
+        print("\nMKVToolNixコマンド:")
+        print(" ".join(args))
+
+        # MKVToolNixコマンドを実行
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+
+        # プロセスの終了を待つ
+        stdout, stderr = process.communicate()
+
+        # 出力を表示
+        print("\nMKVToolNix標準出力:")
+        print(stdout)
+        print("\nMKVToolNixエラー出力:")
+        print(stderr)
+
+        if process.returncode != 0:
+            raise Exception(f"MKVToolNixエラー: {stderr}")
+
+        # 出力ファイルの存在確認
+        if not os.path.exists(output_file):
+            raise Exception(f"出力ファイルが作成されませんでした。\n終了コード: {process.returncode}\n標準出力:\n{stdout}\nエラー出力:\n{stderr}")
+
+    def _export_subtitle_mp4box(self, input_file, stream_index, output_file):
+        """MP4Boxを使用して字幕をエクスポート"""
+        config = self.wizard().config
+        if not config.has_option("Settings", "mp4box_path"):
+            raise Exception("MP4Boxの設定が見つかりません。")
+
+        mp4box_path = config.get("Settings", "mp4box_path")
+        mp4box_dir = os.path.dirname(mp4box_path)
+        os.environ["PATH"] = mp4box_dir + os.pathsep + os.environ["PATH"]
+
+        # MP4Boxコマンドを構築
+        # MP4Boxでは字幕ストリームのインデックスは1から始まる
+        subtitle_index = stream_index + 1
+        args = [
+            mp4box_path,
+            '-raw', str(subtitle_index),
+            input_file,
+            '-out', output_file
+        ]
+
+        # コマンドを表示
+        print("\nMP4Boxコマンド:")
+        print(" ".join(args))
+
+        # MP4Boxコマンドを実行
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+
+        # プロセスの終了を待つ
+        stdout, stderr = process.communicate()
+
+        # 出力を表示
+        print("\nMP4Box標準出力:")
+        print(stdout)
+        print("\nMP4Boxエラー出力:")
+        print(stderr)
+
+        if process.returncode != 0:
+            raise Exception(f"MP4Boxエラー: {stderr}")
+
+        # 出力ファイルの存在確認
+        if not os.path.exists(output_file):
+            raise Exception(f"出力ファイルが作成されませんでした。\n終了コード: {process.returncode}\n標準出力:\n{stdout}\nエラー出力:\n{stderr}")
 
     def nextId(self):
         """次のページのIDを返す"""
